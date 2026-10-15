@@ -51,6 +51,25 @@
         .wave-bar:nth-child(4) { animation-delay: 0.1s; }
         .wave-bar:nth-child(5) { animation-delay: 0.3s; }
 
+        /* 품사 태그 */
+        .pos-tag { display:inline-block; padding:2px 10px; border-radius:999px; font-size:13px; font-weight:700; line-height:1.5; background:#e5e7eb; color:#374151; }
+        .pos-tag-sm { padding:0 6px; font-size:10px; margin-right:4px; vertical-align:1px; }
+        .pos-n   { background:#dbeafe; color:#1d4ed8; }
+        .pos-v   { background:#fee2e2; color:#b91c1c; }
+        .pos-ad  { background:#dcfce7; color:#15803d; }
+        .pos-adv { background:#fef3c7; color:#b45309; }
+        .pos-id  { background:#ede9fe; color:#6d28d9; }
+        .pos-con { background:#cffafe; color:#0e7490; }
+        .pos-pre { background:#fce7f3; color:#be185d; }
+        .dark .pos-tag { background:#374151; color:#e5e7eb; }
+        .dark .pos-n   { background:#1e3a8a; color:#bfdbfe; }
+        .dark .pos-v   { background:#7f1d1d; color:#fecaca; }
+        .dark .pos-ad  { background:#14532d; color:#bbf7d0; }
+        .dark .pos-adv { background:#78350f; color:#fde68a; }
+        .dark .pos-id  { background:#4c1d95; color:#ddd6fe; }
+        .dark .pos-con { background:#164e63; color:#a5f3fc; }
+        .dark .pos-pre { background:#831843; color:#fbcfe8; }
+
         /* Custom scrollbar */
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
@@ -154,8 +173,14 @@
                     <div id="wordDisplay" class="text-3xl sm:text-4xl font-extrabold text-gray-900 dark:text-white tracking-tight mb-3">
                         apple
                     </div>
-                    <div id="meaningDisplay" class="text-lg sm:text-xl font-medium text-gray-600 dark:text-gray-300 transition-opacity duration-200">
-                        사과
+                    <div id="meaningArea">
+                        <div id="posTagsDisplay" class="flex flex-wrap justify-center gap-1.5 mb-2"></div>
+                        <div id="meaningDisplay" class="text-lg sm:text-xl font-medium text-gray-600 dark:text-gray-300">
+                            사과
+                        </div>
+                    </div>
+                    <div id="revealHint" class="hidden text-sm text-gray-400 dark:text-gray-500 font-medium">
+                        <i class="fa-solid fa-hand-pointer mr-1"></i>터치하면 품사와 뜻이 나와요
                     </div>
                 </div>
 
@@ -301,21 +326,89 @@
 
     <!-- Application Logic -->
     <script>
+        // ===== 품사 기호 설정 (기호와 이름을 여기서 수정/추가하면 됩니다) =====
+        const POS_MAP = {
+            'n':   '명사',
+            'v':   '동사',
+            'ad':  '형용사',
+            'adv': '부사',
+            'id':  '숙어',
+            'con': '접속사',
+            'pre': '전치사'
+        };
+
+        const POS_LOOKUP = {};
+        Object.keys(POS_MAP).forEach(k => { POS_LOOKUP[k.toLowerCase()] = k; });
+
+        // 긴 기호부터 매칭 (adv. 가 ad. 로 잘못 잡히지 않도록)
+        const POS_REGEX = new RegExp(
+            '(?<![A-Za-z])(' +
+            Object.keys(POS_MAP)
+                .sort((a, b) => b.length - a.length)
+                .map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+                .join('|') +
+            ')\\.', 'gi'
+        );
+
+        // "v. 성취하다" -> { pos: ['v'], meaning: '성취하다' }
+        // "ad. 의도적인, v. 숙고하다" -> { pos: ['ad','v'], meaning: '의도적인, 숙고하다' }
+        function parsePosAndMeaning(text) {
+            const raw = String(text || '');
+            const pos = [];
+            for (const m of raw.matchAll(POS_REGEX)) {
+                const key = POS_LOOKUP[m[1].toLowerCase()];
+                if (key && !pos.includes(key)) pos.push(key);
+            }
+            const meaning = raw.replace(POS_REGEX, ' ')
+                .replace(/\s+/g, ' ')
+                .replace(/\s+([,;\/])/g, '$1')
+                .replace(/([,;\/])(\s*[,;\/])+/g, '$1')
+                .replace(/^[\s,;\/]+|[\s,;\/]+$/g, '')
+                .trim();
+            return { pos, meaning };
+        }
+
+        function posTagsHTML(posArr, small) {
+            return (posArr || []).map(k =>
+                `<span class="pos-tag pos-${k}${small ? ' pos-tag-sm' : ''}">${POS_MAP[k] || k}</span>`
+            ).join('');
+        }
+
+        function posLabelText(posArr) {
+            return (posArr || []).map(k => `[${POS_MAP[k] || k}]`).join('');
+        }
+
+        // 예전에 저장된 단어(품사 필드 없음)도 자동으로 품사 분리
+        function normalizeWord(w) {
+            if (!Array.isArray(w.pos)) {
+                const parsed = parsePosAndMeaning(w.meaning);
+                w.pos = parsed.pos;
+                if (parsed.meaning) w.meaning = parsed.meaning;
+            }
+            return w;
+        }
+
         const SAMPLE_WORDS = [
-            { id: 1, word: "accomplish", meaning: "성취하다, 완수하다", bookmarked: false, memorized: false },
-            { id: 2, word: "benevolent", meaning: "자애로운, 자선의", bookmarked: true, memorized: false },
-            { id: 3, word: "candidate", meaning: "후보자, 지원자", bookmarked: false, memorized: false },
-            { id: 4, word: "deliberate", meaning: "의도적인, 숙고하다", bookmarked: false, memorized: true },
-            { id: 5, word: "eloquent", meaning: "유창한, 감동적인", bookmarked: true, memorized: false },
-            { id: 6, word: "fascinate", meaning: "매료시키다, 사로잡다", bookmarked: false, memorized: false },
-            { id: 7, word: "genuine", meaning: "진짜의, 진실한", bookmarked: false, memorized: false },
-            { id: 8, word: "hesitate", meaning: "망설이다, 주저하다", bookmarked: false, memorized: false },
-            { id: 9, word: "inevitable", meaning: "피할 수 없는, 불가피한", bookmarked: true, memorized: false },
-            { id: 10, word: "justify", meaning: "정당화하다", bookmarked: false, memorized: false }
+            { id: 1, word: "accomplish", meaning: "성취하다, 완수하다", pos: ['v'], bookmarked: false, memorized: false },
+            { id: 2, word: "benevolent", meaning: "자애로운, 자선의", pos: ['ad'], bookmarked: true, memorized: false },
+            { id: 3, word: "candidate", meaning: "후보자, 지원자", pos: ['n'], bookmarked: false, memorized: false },
+            { id: 4, word: "deliberate", meaning: "의도적인, 숙고하다", pos: ['ad', 'v'], bookmarked: false, memorized: true },
+            { id: 5, word: "eloquent", meaning: "유창한, 감동적인", pos: ['ad'], bookmarked: true, memorized: false },
+            { id: 6, word: "fascinate", meaning: "매료시키다, 사로잡다", pos: ['v'], bookmarked: false, memorized: false },
+            { id: 7, word: "genuine", meaning: "진짜의, 진실한", pos: ['ad'], bookmarked: false, memorized: false },
+            { id: 8, word: "give up", meaning: "포기하다", pos: ['id'], bookmarked: false, memorized: false },
+            { id: 9, word: "inevitable", meaning: "피할 수 없는, 불가피한", pos: ['ad'], bookmarked: true, memorized: false },
+            { id: 10, word: "although", meaning: "비록 ~이지만", pos: ['con'], bookmarked: false, memorized: false }
         ];
 
+        function cloneSamples() {
+            return SAMPLE_WORDS.map(w => ({ ...w, pos: [...w.pos] }));
+        }
+
         // State variables
-        let masterWordsList = JSON.parse(localStorage.getItem('voca_words')) || [...SAMPLE_WORDS];
+        let storedWords = null;
+        try { storedWords = JSON.parse(localStorage.getItem('voca_words')); } catch (e) {}
+        let masterWordsList = (storedWords || cloneSamples()).map(normalizeWord);
         let activeFilter = 'ALL';
         let currentFilteredList = [];
         let currentIndex = 0;
@@ -328,6 +421,9 @@
         // Elements
         const wordDisplay = document.getElementById('wordDisplay');
         const meaningDisplay = document.getElementById('meaningDisplay');
+        const posTagsDisplay = document.getElementById('posTagsDisplay');
+        const meaningArea = document.getElementById('meaningArea');
+        const revealHint = document.getElementById('revealHint');
         const cardProgress = document.getElementById('cardProgress');
         const playPauseBtn = document.getElementById('playPauseBtn');
         const playIcon = document.getElementById('playIcon');
@@ -414,7 +510,10 @@
             if (currentFilteredList.length === 0) {
                 wordDisplay.textContent = "단어 없음";
                 meaningDisplay.textContent = "조건에 해당하는 단어가 없습니다.";
-                meaningDisplay.style.opacity = "1";
+                posTagsDisplay.innerHTML = '';
+                posTagsDisplay.classList.add('hidden');
+                meaningArea.classList.remove('hidden');
+                revealHint.classList.add('hidden');
                 cardProgress.textContent = "0 / 0";
                 return;
             }
@@ -424,13 +523,13 @@
             const current = currentFilteredList[currentIndex];
             wordDisplay.textContent = current.word;
             meaningDisplay.textContent = current.meaning;
+            posTagsDisplay.innerHTML = posTagsHTML(current.pos);
+            posTagsDisplay.classList.toggle('hidden', !(current.pos && current.pos.length));
 
-            // In Manual Mode step 1, hide meaning until revealed
-            if (playMode === 'MANUAL' && manualStep === 'WORD') {
-                meaningDisplay.style.opacity = "0.15";
-            } else {
-                meaningDisplay.style.opacity = "1";
-            }
+            // 수동 모드 1단계: 영어 단어만 표시, 터치/다음 시 품사+뜻 표시
+            const hideMeaning = playMode === 'MANUAL' && manualStep === 'WORD';
+            meaningArea.classList.toggle('hidden', hideMeaning);
+            revealHint.classList.toggle('hidden', !hideMeaning);
 
             cardProgress.textContent = `${currentIndex + 1} / ${currentFilteredList.length}`;
 
@@ -686,7 +785,7 @@
             if ('mediaSession' in navigator && wordObj) {
                 navigator.mediaSession.metadata = new MediaMetadata({
                     title: wordObj.word,
-                    artist: playMode === 'MANUAL' && manualStep === 'WORD' ? '뜻을 떠올려보세요' : wordObj.meaning,
+                    artist: playMode === 'MANUAL' && manualStep === 'WORD' ? '뜻을 떠올려보세요' : `${posLabelText(wordObj.pos)} ${wordObj.meaning}`.trim(),
                     album: playMode === 'AUTO' ? 'VocaAudio (자동모드)' : 'VocaAudio (수동모드)'
                 });
             }
@@ -729,15 +828,16 @@
             let autoId = 1;
 
             lines.forEach(line => {
-                const trimmed = line.trim();
+                const trimmed = line.replace(/^\uFEFF/, '').trim();
                 if (!trimmed) return;
-                const parts = trimmed.split(/[,;\t]/);
-                if (parts.length >= 2) {
-                    const word = parts[0].trim();
-                    const meaning = parts.slice(1).join(',').trim();
-                    if (word && meaning) {
-                        newWords.push({ id: autoId++, word, meaning, bookmarked: false, memorized: false });
-                    }
+                // 첫 번째 구분자(쉼표/세미콜론/탭)에서만 단어와 나머지를 분리
+                const m = trimmed.match(/^([^,;\t]+)[,;\t](.+)$/);
+                if (!m) return;
+                const strip = s => s.trim().replace(/^"(.*)"$/, '$1').trim();
+                const word = strip(m[1]);
+                const parsed = parsePosAndMeaning(strip(m[2]));
+                if (word && parsed.meaning) {
+                    newWords.push({ id: autoId++, word, meaning: parsed.meaning, pos: parsed.pos, bookmarked: false, memorized: false });
                 }
             });
 
@@ -748,7 +848,7 @@
                 applyFilter('ALL');
                 alert(`성공적으로 ${newWords.length}개의 단어를 불러왔습니다.`);
             } else {
-                alert('단어를 불러오지 못했습니다. "단어, 뜻" (한 줄에 하나씩) 형식을 확인해주세요.');
+                alert('단어를 불러오지 못했습니다. "accomplish, v. 성취하다" (한 줄에 하나씩) 형식을 확인해주세요.');
             }
         }
 
@@ -767,7 +867,7 @@
                         <span class="text-gray-400 font-mono text-[10px] w-6">${index + 1}</span>
                         <div class="truncate">
                             <div class="font-bold text-gray-800 dark:text-gray-200 text-sm truncate">${item.word}</div>
-                            <div class="text-gray-500 dark:text-gray-400 truncate">${item.meaning}</div>
+                            <div class="text-gray-500 dark:text-gray-400 truncate">${posTagsHTML(item.pos, true)}${item.meaning}</div>
                         </div>
                     </div>
                     <div class="flex items-center space-x-2 shrink-0">
@@ -917,7 +1017,7 @@
 
             resetSampleDataBtn.addEventListener('click', () => {
                 if (confirm('기본 샘플 단어장 데이터로 복원하시겠습니까?')) {
-                    masterWordsList = [...SAMPLE_WORDS];
+                    masterWordsList = cloneSamples();
                     saveToStorage();
                     fileBadge.textContent = "기본 sample.csv";
                     applyFilter('ALL');
